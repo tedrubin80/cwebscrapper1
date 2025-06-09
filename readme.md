@@ -16,23 +16,23 @@ A web application that automatically scrapes and tracks releases from The Criter
 
 ## 🚀 Quick Deploy to DigitalOcean
 
-[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/tedrubin80/criterion-tracker/tree/main)
+[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/YOUR_USERNAME/criterion-tracker/tree/main)
 
 ### 1. Fork This Repository
 
 1. Click the "Fork" button at the top right of this repository
 2. Clone your fork locally:
 ```bash
-git clone https://github.com/tedrubin80/criterion-tracker.git
+git clone https://github.com/YOUR_USERNAME/criterion-tracker.git
 cd criterion-tracker
 ```
 
 ### 2. Update Configuration
 
-Edit `.app.yaml` and replace `tedrubin80` with your GitHub username:
+Edit `.app.yaml` and replace `YOUR_USERNAME` with your GitHub username:
 ```yaml
 github:
-  repo: tedrubin80/criterion-tracker
+  repo: YOUR_USERNAME/criterion-tracker
 ```
 
 Generate a secret key:
@@ -83,7 +83,7 @@ criterion-tracker/
 ### Setup
 ```bash
 # Clone the repository
-git clone https://github.com/tedrubin80/criterion-tracker.git
+git clone https://github.com/YOUR_USERNAME/criterion-tracker.git
 cd criterion-tracker
 
 # Create virtual environment
@@ -315,7 +315,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Support
 
-- **Issues**: [GitHub Issues](https://github.com/tedrubin80/criterion-tracker/issues)
+- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/criterion-tracker/issues)
 - **Documentation**: This README
 - **API Reference**: Visit `/status` page on your deployed app
 
