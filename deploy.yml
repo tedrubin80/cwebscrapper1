@@ -1,0 +1,318 @@
+# FILE: .github/workflows/deploy.yml
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Test scraper
+      run: |
+        python -c "
+        from criterion_scraper import CriterionScraper
+        scraper = CriterionScraper(':memory:')  # Use in-memory database for testing
+        print('Scraper initialized successfully')
+        "
+        
+    - name: Test Flask app
+      run: |
+        export FLASK_ENV=testing
+        export SECRET_KEY=test-key
+        export DATABASE_PATH=:memory:
+        python -c "
+        from app import app
+        with app.test_client() as client:
+            response = client.get('/health')
+            assert response.status_code == 200
+            print('Flask app health check passed')
+        "
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Deploy to DigitalOcean
+      run: |
+        echo "🚀 Deployment triggered!"
+        echo "DigitalOcean App Platform will automatically deploy from GitHub"
+        echo "Monitor deployment at: https://cloud.digitalocean.com/apps"
+
+# FILE: .github/workflows/scrape-schedule.yml  
+name: Scheduled Scraping Trigger
+
+on:
+  schedule:
+    # Run at 9 AM UTC every day (adjust timezone as needed)
+    - cron: '0 9 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  trigger-scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Trigger Scraping
+      run: |
+        curl -X POST "${{ secrets.APP_URL }}/api/scrape" \
+          -H "Content-Type: application/json" \
+          -d '{"source": "github-actions"}'
+        echo "✅ Scraping triggered successfully"
+        
+    - name: Verify Status
+      run: |
+        sleep 10  # Wait a bit for scraping to start
+        curl "${{ secrets.APP_URL }}/api/stats" | jq .
+      env:
+        APP_URL: ${{ secrets.APP_URL }}
+
+# FILE: scripts/health_check.py
+#!/usr/bin/env python3
+"""
+Health check script for monitoring the Criterion Collection Tracker
+Can be used by external monitoring services like UptimeRobot
+"""
+
+import requests
+import sys
+import json
+from datetime import datetime, timedelta
+
+def check_health(base_url):
+    """Check application health and return status"""
+    try:
+        # Check health endpoint
+        health_response = requests.get(f"{base_url}/health", timeout=30)
+        if health_response.status_code != 200:
+            return False, f"Health check failed: {health_response.status_code}"
+        
+        # Check stats endpoint
+        stats_response = requests.get(f"{base_url}/api/stats", timeout=30)
+        if stats_response.status_code != 200:
+            return False, f"Stats endpoint failed: {stats_response.status_code}"
+        
+        stats = stats_response.json()
+        
+        # Check if database has films
+        if stats.get('total_films', 0) == 0:
+            return False, "No films in database"
+        
+        # Check if last scrape was recent (within 48 hours)
+        last_scrape = stats.get('last_scrape')
+        if last_scrape:
+            last_scrape_time = datetime.fromisoformat(last_scrape.replace('Z', '+00:00'))
+            if datetime.now().astimezone() - last_scrape_time > timedelta(hours=48):
+                return False, f"Last scrape was {last_scrape_time}, more than 48 hours ago"
+        
+        return True, f"✅ Healthy - {stats['total_films']} films, last scrape: {last_scrape or 'Never'}"
+        
+    except requests.RequestException as e:
+        return False, f"Connection error: {str(e)}"
+    except Exception as e:
+        return False, f"Unexpected error: {str(e)}"
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python health_check.py <base_url>")
+        print("Example: python health_check.py https://your-app.ondigitalocean.app")
+        sys.exit(1)
+    
+    base_url = sys.argv[1].rstrip('/')
+    is_healthy, message = check_health(base_url)
+    
+    print(f"{datetime.now().isoformat()}: {message}")
+    
+    if not is_healthy:
+        sys.exit(1)  # Exit with error code for monitoring services
+
+# FILE: scripts/daily_backup.py
+#!/usr/bin/env python3
+"""
+Daily backup script - downloads and saves the complete dataset
+"""
+
+import requests
+import json
+import os
+from datetime import datetime
+
+def backup_data(base_url, backup_dir="backups"):
+    """Download and save complete dataset"""
+    try:
+        # Create backup directory
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Download data
+        response = requests.get(f"{base_url}/export", timeout=60)
+        response.raise_for_status()
+        
+        # Save with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{backup_dir}/criterion_backup_{timestamp}.json"
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(response.text)
+        
+        # Get file size
+        file_size = os.path.getsize(filename)
+        
+        print(f"✅ Backup saved: {filename} ({file_size:,} bytes)")
+        
+        # Parse and show stats
+        data = response.json()
+        print(f"📊 Films backed up: {data.get('total_films', 0)}")
+        print(f"🕐 Export time: {data.get('exported_at', 'Unknown')}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Backup failed: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) != 2:
+        print("Usage: python daily_backup.py <base_url>")
+        sys.exit(1)
+    
+    base_url = sys.argv[1].rstrip('/')
+    success = backup_data(base_url)
+    
+    if not success:
+        sys.exit(1)
+
+# FILE: scripts/trigger_scrape.sh
+#!/bin/bash
+# Simple script to trigger scraping and monitor progress
+
+APP_URL="${1:-https://your-app.ondigitalocean.app}"
+
+echo "🔄 Triggering scrape at $APP_URL"
+
+# Trigger scraping
+RESPONSE=$(curl -s -w "%{http_code}" -X POST "$APP_URL/api/scrape")
+HTTP_CODE="${RESPONSE: -3}"
+
+if [ "$HTTP_CODE" -eq 200 ]; then
+    echo "✅ Scraping triggered successfully"
+    
+    echo "⏳ Waiting for scraping to complete..."
+    
+    # Monitor progress (max 10 minutes)
+    for i in {1..60}; do
+        sleep 10
+        
+        STATS=$(curl -s "$APP_URL/api/stats")
+        IN_PROGRESS=$(echo "$STATS" | grep -o '"scraping_in_progress":[^,]*' | cut -d':' -f2)
+        
+        if [ "$IN_PROGRESS" = "false" ]; then
+            echo "✅ Scraping completed!"
+            
+            # Show final stats
+            TOTAL_FILMS=$(echo "$STATS" | grep -o '"total_films":[0-9]*' | cut -d':' -f2)
+            echo "📊 Total films in database: $TOTAL_FILMS"
+            break
+        else
+            echo "⏳ Still scraping... (${i}0 seconds)"
+        fi
+        
+        if [ $i -eq 60 ]; then
+            echo "⚠️  Scraping taking longer than expected (10 minutes)"
+        fi
+    done
+    
+else
+    echo "❌ Failed to trigger scraping (HTTP $HTTP_CODE)"
+    exit 1
+fi
+
+# FILE: docker-compose.yml (Alternative deployment option)
+version: '3.8'
+
+services:
+  criterion-tracker:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key}
+      - DATABASE_PATH=/app/data/criterion_releases.db
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Optional: Add a reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/ssl:ro
+    depends_on:
+      - criterion-tracker
+    restart: unless-stopped
+
+# FILE: Dockerfile (Alternative deployment option)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create data directory
+RUN mkdir -p /app/data /app/logs
+
+# Create non-root user
+RUN useradd -m -u 1000 criterionapp && \
+    chown -R criterionapp:criterionapp /app
+USER criterionapp
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Run application
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "120", "--workers", "2", "app:app"]
