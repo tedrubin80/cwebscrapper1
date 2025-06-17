@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Criterion Collection Tracker</title>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-film"></i> Criterion Collection Tracker</h1>
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-number"><%= totalFilms %></span>
+                    <span class="stat-label">Total Films</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number"><%= films.length %></span>
+                    <span class="stat-label">Recently Added</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number"><%= lastScrape %></span>
+                    <span class="stat-label">Last Updated</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="actions">
+            <button id="manual-scrape" class="btn btn-primary">
+                <i class="fas fa-sync-alt"></i> Manual Scrape
+            </button>
+            <button id="export-data" class="btn btn-secondary">
+                <i class="fas fa-download"></i> Export to Text
+            </button>
+            <button id="download-latest" class="btn btn-secondary">
+                <i class="fas fa-file-text"></i> Download Latest Export
+            </button>
+        </div>
+
+        <div id="status-message" class="status-message" style="display: none;"></div>
+
+        <main class="main-content">
+            <h2>Recent Criterion Releases</h2>
+            
+            <% if (films.length === 0) { %>
+                <div class="empty-state">
+                    <i class="fas fa-film fa-3x"></i>
+                    <h3>No releases found</h3>
+                    <p>Click "Manual Scrape" to fetch the latest Criterion releases</p>
+                </div>
+            <% } else { %>
+                <div class="films-grid">
+                    <% films.forEach((film, index) => { %>
+                        <div class="film-card">
+                            <div class="film-image">
+                                <% if (film.cover_art_url) { %>
+                                    <img src="<%= film.cover_art_url %>" alt="<%= film.title %>" loading="lazy">
+                                <% } else { %>
+                                    <div class="no-image">
+                                        <i class="fas fa-film"></i>
+                                    </div>
+                                <% } %>
+                            </div>
+                            <div class="film-details">
+                                <h3 class="film-title"><%= film.title %></h3>
+                                <p class="film-director">
+                                    <i class="fas fa-user"></i> 
+                                    <%= film.director || 'Unknown Director' %>
+                                </p>
+                                
+                                <% if (film.spine_number) { %>
+                                    <p class="film-spine">
+                                        <i class="fas fa-hashtag"></i> 
+                                        Spine #<%= film.spine_number %>
+                                    </p>
+                                <% } %>
+                                
+                                <% if (film.release_date) { %>
+                                    <p class="film-date">
+                                        <i class="fas fa-calendar"></i> 
+                                        <%= new Date(film.release_date).toLocaleDateString() %>
+                                    </p>
+                                <% } %>
+                                
+                                <% if (film.format) { %>
+                                    <p class="film-format">
+                                        <i class="fas fa-compact-disc"></i> 
+                                        <%= film.format %>
+                                    </p>
+                                <% } %>
+                                
+                                <% if (film.price) { %>
+                                    <p class="film-price">
+                                        <i class="fas fa-dollar-sign"></i> 
+                                        <%= film.price %>
+                                    </p>
+                                <% } %>
+                                
+                                <div class="film-actions">
+                                    <% if (film.url) { %>
+                                        <a href="<%= film.url %>" target="_blank" class="btn btn-small">
+                                            <i class="fas fa-external-link-alt"></i> View on Criterion
+                                        </a>
+                                    <% } %>
+                                </div>
+                                
+                                <div class="film-meta">
+                                    <small>
+                                        <i class="fas fa-plus"></i> 
+                                        Added <%= new Date(film.created_at).toLocaleDateString() %>
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    <% }) %>
+                </div>
+                
+                <div class="load-more">
+                    <button id="load-all" class="btn btn-outline">
+                        <i class="fas fa-eye"></i> View All Films
+                    </button>
+                </div>
+            <% } %>
+        </main>
+
+        <footer class="footer">
+            <p>
+                <i class="fas fa-clock"></i> 
+                Next automatic scrape scheduled for the 1st of next month at 9 AM
+            </p>
+            <p>
+                <i class="fas fa-info-circle"></i> 
+                Data sourced from <a href="https://www.criterion.com" target="_blank">criterion.com</a>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        // Manual scrape functionality
+        document.getElementById('manual-scrape').addEventListener('click', async () => {
+            const button = document.getElementById('manual-scrape');
+            const status = document.getElementById('status-message');
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scraping...';
+            
+            showStatus('Starting scrape...', 'info');
+            
+            try {
+                const response = await fetch('/api/scrape', { method: 'POST' });
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus('Scrape completed successfully! Refreshing page...', 'success');
+                    setTimeout(() => window.location.reload(), 2000);
+                } else {
+                    showStatus('Scrape failed: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showStatus('Network error: ' + error.message, 'error');
+            }
+            
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-sync-alt"></i> Manual Scrape';
+        });
+
+        // Export functionality
+        document.getElementById('export-data').addEventListener('click', async () => {
+            const button = document.getElementById('export-data');
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+            
+            showStatus('Creating text export...', 'info');
+            
+            try {
+                const response = await fetch('/export');
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus(`Export created: ${result.filename} (${result.total_films} films)`, 'success');
+                } else {
+                    showStatus('Export failed: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showStatus('Export error: ' + error.message, 'error');
+            }
+            
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-download"></i> Export to Text';
+        });
+
+        // Download latest export
+        document.getElementById('download-latest').addEventListener('click', () => {
+            window.location.href = '/download-export';
+        });
+
+        // Load all films
+        document.getElementById('load-all').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/films');
+                const films = await response.json();
+                
+                if (response.ok) {
+                    // Replace current films display with all films
+                    window.location.href = '/all-films';
+                }
+            } catch (error) {
+                showStatus('Error loading films: ' + error.message, 'error');
+            }
+        });
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status-message');
+            status.textContent = message;
+            status.className = `status-message ${type}`;
+            status.style.display = 'block';
+            
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
